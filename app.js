@@ -18,12 +18,14 @@ const state = {
     totalImages: 0,
     // Regenerator
     regenResult: null,
+    // Stop control
+    stopRequested: false,
 };
 
 // --- DOM Elements ---
 let $apiKey, $toggleKey, $saveKey, $keyStatus, $modelSelect, $aspectSelect,
     $qualitySelect, $concurrencySelect, $mdInput, $creativeCount, $btnGenerate,
-    $progressPanel, $progressBar, $progressText, $batchLog, $galleryPanel,
+    $btnStop, $progressPanel, $progressBar, $progressText, $batchLog, $galleryPanel,
     $galleryGrid, $btnApproveAll, $btnNewBatch, $approvedGrid, $approvedEmpty,
     $btnDownloadAll, $btnClearApproved, $approvedCountBadge,
     $regenPrompt, $regenModel, $regenAspect, $regenQuality, $btnRegen,
@@ -42,6 +44,7 @@ function cacheDom() {
     $mdInput = document.getElementById('md-input');
     $creativeCount = document.getElementById('creative-count');
     $btnGenerate = document.getElementById('btn-generate');
+    $btnStop = document.getElementById('btn-stop');
     $progressPanel = document.getElementById('progress-panel');
     $progressBar = document.getElementById('progress-bar');
     $progressText = document.getElementById('progress-text');
@@ -126,6 +129,7 @@ function setupEventListeners() {
     });
 
     $btnGenerate.addEventListener('click', startGeneration);
+    $btnStop.addEventListener('click', stopGeneration);
     $btnApproveAll.addEventListener('click', approveAll);
     $btnNewBatch.addEventListener('click', resetForNewBatch);
     $btnDownloadAll.addEventListener('click', downloadAllApproved);
@@ -190,6 +194,7 @@ function updateRegenButton() {
 async function startGeneration() {
     if (state.isGenerating) return;
     state.isGenerating = true;
+    state.stopRequested = false;
     state.generatedImages = [];
     state.completed = 0;
     state.failed = [];
@@ -203,6 +208,7 @@ async function startGeneration() {
     $progressPanel.style.display = 'block';
     $galleryPanel.style.display = 'none';
     $btnGenerate.disabled = true;
+    $btnStop.style.display = 'inline-block';
     $batchLog.innerHTML = '';
 
     // Crear cola de tareas: cada creative x 2 variantes
@@ -220,8 +226,8 @@ async function startGeneration() {
     // Lanzar pool
     await runPool();
 
-    // Reintentos
-    if (state.failed.length > 0) {
+    // Reintentos (solo si no se detuvo)
+    if (state.failed.length > 0 && !state.stopRequested) {
         logEntry(`\n--- Reintentando ${state.failed.length} fallidos ---`, 'info');
         const retryTasks = state.failed.map(f => ({ ...f, retries: f.retries + 1 }));
         state.failed = [];
@@ -231,10 +237,15 @@ async function startGeneration() {
 
     // Finalizar
     const successCount = state.generatedImages.length;
-    logEntry(`\n=== Finalizado: ${successCount}/${state.totalImages} exitosas, ${state.failed.length} fallidas ===`, 'info');
-    updateProgress(state.completed, state.totalImages, `Completado: ${successCount}/${state.totalImages}`);
+    const stopMsg = state.stopRequested ? ' (DETENIDO)' : '';
+    logEntry(`\n=== Finalizado${stopMsg}: ${successCount}/${state.totalImages} exitosas, ${state.failed.length} fallidas ===`, 'info');
+    updateProgress(state.completed, state.totalImages, `Completado: ${successCount}/${state.totalImages}${stopMsg}`);
 
     state.isGenerating = false;
+    state.stopRequested = false;
+    $btnStop.style.display = 'none';
+    $btnStop.disabled = false;
+    $btnStop.textContent = '⛔ Detener';
     updateGenerateButton();
 
     if (state.generatedImages.length > 0) {
@@ -242,14 +253,22 @@ async function startGeneration() {
     }
 }
 
+function stopGeneration() {
+    state.stopRequested = true;
+    state.taskQueue = []; // Vaciar la cola
+    logEntry('⛔ Deteniendo generación... esperando workers activos...', 'error');
+    $btnStop.disabled = true;
+    $btnStop.textContent = 'Deteniendo...';
+}
+
 function runPool() {
     return new Promise((resolve) => {
         const checkDone = () => {
-            if (state.taskQueue.length === 0 && state.activeWorkers === 0) {
+            if ((state.taskQueue.length === 0 && state.activeWorkers === 0) || (state.stopRequested && state.activeWorkers === 0)) {
                 resolve();
                 return;
             }
-            while (state.activeWorkers < state.maxConcurrency && state.taskQueue.length > 0) {
+            while (state.activeWorkers < state.maxConcurrency && state.taskQueue.length > 0 && !state.stopRequested) {
                 const task = state.taskQueue.shift();
                 state.activeWorkers++;
                 updateStats();

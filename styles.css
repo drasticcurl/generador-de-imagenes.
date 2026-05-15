@@ -216,6 +216,33 @@ select {
     cursor: not-allowed;
 }
 
+.btn-stop {
+    background: #dc3545;
+    border: none;
+    border-radius: 10px;
+    color: #fff;
+    padding: 12px 22px;
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.btn-stop:hover:not(:disabled) {
+    background: #b02a37;
+}
+
+.btn-stop:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.generate-actions {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+}
+
 .btn-secondary {
     background: #2a2a2a;
     border: 1px solid #444;
