@@ -7,35 +7,77 @@ const state = {
     apiKey: '',
     creatives: [],
     generatedImages: [],
+    approvedImages: JSON.parse(localStorage.getItem('approved_images') || '[]'),
     isGenerating: false,
-    currentBatch: 0,
-    totalBatches: 0,
+    // Concurrency pool
+    activeWorkers: 0,
+    maxConcurrency: 3,
+    taskQueue: [],
+    completed: 0,
+    failed: [],
+    totalImages: 0,
+    // Regenerator
+    regenResult: null,
 };
 
 // --- DOM Elements ---
-const $apiKey = document.getElementById('api-key');
-const $toggleKey = document.getElementById('toggle-key');
-const $saveKey = document.getElementById('save-key');
-const $keyStatus = document.getElementById('key-status');
-const $modelSelect = document.getElementById('model-select');
-const $aspectSelect = document.getElementById('aspect-select');
-const $qualitySelect = document.getElementById('quality-select');
-const $mdInput = document.getElementById('md-input');
-const $creativeCount = document.getElementById('creative-count');
-const $btnGenerate = document.getElementById('btn-generate');
-const $progressPanel = document.getElementById('progress-panel');
-const $progressBar = document.getElementById('progress-bar');
-const $progressText = document.getElementById('progress-text');
-const $batchLog = document.getElementById('batch-log');
-const $galleryPanel = document.getElementById('gallery-panel');
-const $galleryGrid = document.getElementById('gallery-grid');
-const $btnDownloadApproved = document.getElementById('btn-download-approved');
-const $btnNewBatch = document.getElementById('btn-new-batch');
+let $apiKey, $toggleKey, $saveKey, $keyStatus, $modelSelect, $aspectSelect,
+    $qualitySelect, $concurrencySelect, $mdInput, $creativeCount, $btnGenerate,
+    $progressPanel, $progressBar, $progressText, $batchLog, $galleryPanel,
+    $galleryGrid, $btnApproveAll, $btnNewBatch, $approvedGrid, $approvedEmpty,
+    $btnDownloadAll, $btnClearApproved, $approvedCountBadge,
+    $regenPrompt, $regenModel, $regenAspect, $regenQuality, $btnRegen,
+    $regenStatus, $regenResult, $regenImage, $btnRegenApprove, $btnRegenDownload,
+    $btnRegenAgain, $statCompleted, $statActive, $statFailed;
+
+function cacheDom() {
+    $apiKey = document.getElementById('api-key');
+    $toggleKey = document.getElementById('toggle-key');
+    $saveKey = document.getElementById('save-key');
+    $keyStatus = document.getElementById('key-status');
+    $modelSelect = document.getElementById('model-select');
+    $aspectSelect = document.getElementById('aspect-select');
+    $qualitySelect = document.getElementById('quality-select');
+    $concurrencySelect = document.getElementById('concurrency-select');
+    $mdInput = document.getElementById('md-input');
+    $creativeCount = document.getElementById('creative-count');
+    $btnGenerate = document.getElementById('btn-generate');
+    $progressPanel = document.getElementById('progress-panel');
+    $progressBar = document.getElementById('progress-bar');
+    $progressText = document.getElementById('progress-text');
+    $batchLog = document.getElementById('batch-log');
+    $galleryPanel = document.getElementById('gallery-panel');
+    $galleryGrid = document.getElementById('gallery-grid');
+    $btnApproveAll = document.getElementById('btn-approve-all');
+    $btnNewBatch = document.getElementById('btn-new-batch');
+    $approvedGrid = document.getElementById('approved-grid');
+    $approvedEmpty = document.getElementById('approved-empty');
+    $btnDownloadAll = document.getElementById('btn-download-all');
+    $btnClearApproved = document.getElementById('btn-clear-approved');
+    $approvedCountBadge = document.getElementById('approved-count-badge');
+    $regenPrompt = document.getElementById('regen-prompt');
+    $regenModel = document.getElementById('regen-model');
+    $regenAspect = document.getElementById('regen-aspect');
+    $regenQuality = document.getElementById('regen-quality');
+    $btnRegen = document.getElementById('btn-regen');
+    $regenStatus = document.getElementById('regen-status');
+    $regenResult = document.getElementById('regen-result');
+    $regenImage = document.getElementById('regen-image');
+    $btnRegenApprove = document.getElementById('btn-regen-approve');
+    $btnRegenDownload = document.getElementById('btn-regen-download');
+    $btnRegenAgain = document.getElementById('btn-regen-again');
+    $statCompleted = document.getElementById('stat-completed');
+    $statActive = document.getElementById('stat-active');
+    $statFailed = document.getElementById('stat-failed');
+}
 
 // --- Init ---
 function init() {
+    cacheDom();
     loadApiKey();
     setupEventListeners();
+    setupTabs();
+    renderApprovedGallery();
 }
 
 function loadApiKey() {
@@ -43,11 +85,23 @@ function loadApiKey() {
     if (saved) {
         state.apiKey = saved;
         $apiKey.value = saved;
-        $keyStatus.textContent = '✓ Guardada en localStorage';
+        $keyStatus.textContent = '✓ Guardada';
         $keyStatus.classList.add('saved');
         updateGenerateButton();
     }
 }
+
+function setupTabs() {
+    document.querySelectorAll('.tab').forEach(tab => {
+        tab.addEventListener('click', () => {
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+            tab.classList.add('active');
+            document.getElementById(`tab-${tab.dataset.tab}`).classList.add('active');
+        });
+    });
+}
+
 
 function setupEventListeners() {
     $toggleKey.addEventListener('click', () => {
@@ -59,9 +113,10 @@ function setupEventListeners() {
         if (key) {
             localStorage.setItem('gemini_api_key', key);
             state.apiKey = key;
-            $keyStatus.textContent = '✓ Guardada en localStorage';
+            $keyStatus.textContent = '✓ Guardada';
             $keyStatus.classList.add('saved');
             updateGenerateButton();
+            updateRegenButton();
         }
     });
 
@@ -71,24 +126,29 @@ function setupEventListeners() {
     });
 
     $btnGenerate.addEventListener('click', startGeneration);
-    $btnDownloadApproved.addEventListener('click', downloadApproved);
+    $btnApproveAll.addEventListener('click', approveAll);
     $btnNewBatch.addEventListener('click', resetForNewBatch);
+    $btnDownloadAll.addEventListener('click', downloadAllApproved);
+    $btnClearApproved.addEventListener('click', clearApproved);
+
+    // Regenerator
+    $regenPrompt.addEventListener('input', updateRegenButton);
+    $btnRegen.addEventListener('click', regenerateSingle);
+    $btnRegenApprove.addEventListener('click', approveRegenerated);
+    $btnRegenDownload.addEventListener('click', downloadRegenerated);
+    $btnRegenAgain.addEventListener('click', regenerateSingle);
 }
 
 // --- Parser ---
 function parseCreatives() {
     const text = $mdInput.value;
     const creatives = [];
-
-    // Split by "## Creative" headers
     const blocks = text.split(/^## Creative/gm);
 
     for (let i = 1; i < blocks.length; i++) {
         const block = '## Creative' + blocks[i];
         const creative = parseCreativeBlock(block);
-        if (creative) {
-            creatives.push(creative);
-        }
+        if (creative) creatives.push(creative);
     }
 
     state.creatives = creatives;
@@ -97,50 +157,44 @@ function parseCreatives() {
 }
 
 function parseCreativeBlock(block) {
-    // Extraer título
     const titleMatch = block.match(/^## Creative\s+(\d+):\s*(.+)$/m);
     if (!titleMatch) return null;
 
     const number = titleMatch[1];
     const title = titleMatch[2].trim();
 
-    // Extraer todo desde "Visual idea:" o "**Visual idea:**" hasta el final del bloque
-    // Esto incluye Visual idea + Text overlays + Color Palette + Overall mood
-    const promptMatch = block.match(/\*\*Visual idea:\*\*\s*([\s\S]*?)(?=^---|\Z)/m);
-
     let prompt = '';
-    if (promptMatch) {
-        // Tomamos todo desde "**Visual idea:**" hasta "---" o fin del bloque
-        const startIdx = block.indexOf('**Visual idea:**');
-        if (startIdx !== -1) {
-            // Buscar el separador "---" que cierra el creative
-            const endIdx = block.indexOf('\n---', startIdx);
-            if (endIdx !== -1) {
-                prompt = block.substring(startIdx, endIdx).trim();
-            } else {
-                prompt = block.substring(startIdx).trim();
-            }
+    const startIdx = block.indexOf('**Visual idea:**');
+    if (startIdx !== -1) {
+        const endIdx = block.indexOf('\n---', startIdx);
+        if (endIdx !== -1) {
+            prompt = block.substring(startIdx, endIdx).trim();
+        } else {
+            prompt = block.substring(startIdx).trim();
         }
     }
 
     if (!prompt) return null;
-
-    return {
-        number,
-        title,
-        prompt,
-    };
+    return { number, title, prompt };
 }
 
-// --- Generación ---
+// --- Generación con Pool de Concurrencia ---
 function updateGenerateButton() {
-    $btnGenerate.disabled = !(state.apiKey && state.creatives.length > 0);
+    $btnGenerate.disabled = !(state.apiKey && state.creatives.length > 0 && !state.isGenerating);
+}
+
+function updateRegenButton() {
+    $btnRegen.disabled = !(state.apiKey && $regenPrompt.value.trim().length > 0);
 }
 
 async function startGeneration() {
     if (state.isGenerating) return;
     state.isGenerating = true;
     state.generatedImages = [];
+    state.completed = 0;
+    state.failed = [];
+    state.activeWorkers = 0;
+    state.maxConcurrency = parseInt($concurrencySelect.value);
 
     const model = $modelSelect.value;
     const aspect = $aspectSelect.value;
@@ -151,113 +205,112 @@ async function startGeneration() {
     $btnGenerate.disabled = true;
     $batchLog.innerHTML = '';
 
-    const totalImages = state.creatives.length * 2;
-    let completed = 0;
-    let failed = [];
-
-    // Procesar en batches de 5 creatives (10 imágenes)
-    const batchSize = 5;
-    const batches = [];
-    for (let i = 0; i < state.creatives.length; i += batchSize) {
-        batches.push(state.creatives.slice(i, i + batchSize));
-    }
-
-    state.totalBatches = batches.length;
-
-    for (let b = 0; b < batches.length; b++) {
-        state.currentBatch = b + 1;
-        logEntry(`--- Batch ${b + 1}/${batches.length} ---`, 'info');
-
-        const batch = batches[b];
-
-        // Generar 2 imágenes por creative, de forma secuencial por API limits
-        for (const creative of batch) {
-            for (let variant = 1; variant <= 2; variant++) {
-                updateProgress(completed, totalImages, `Generando: Creative ${creative.number} - Variante ${variant}`);
-
-                const result = await generateImage(creative, variant, model, aspect, quality);
-
-                if (result.success) {
-                    state.generatedImages.push({
-                        creative: creative,
-                        variant,
-                        imageData: result.imageData,
-                        mimeType: result.mimeType,
-                        status: 'pending', // pending, approved, rejected
-                    });
-                    logEntry(`✓ Creative ${creative.number} v${variant} generada`, 'success');
-                    completed++;
-                } else {
-                    logEntry(`✗ Creative ${creative.number} v${variant}: ${result.error}`, 'error');
-                    failed.push({ creative, variant, error: result.error });
-                }
-
-                updateProgress(completed, totalImages, '');
-                // Pequeña pausa entre requests
-                await sleep(500);
-            }
+    // Crear cola de tareas: cada creative x 2 variantes
+    state.taskQueue = [];
+    for (const creative of state.creatives) {
+        for (let variant = 1; variant <= 2; variant++) {
+            state.taskQueue.push({ creative, variant, model, aspect, quality, retries: 0 });
         }
     }
+    state.totalImages = state.taskQueue.length;
 
-    // Reintentos para fallidos
-    if (failed.length > 0) {
-        logEntry(`\n--- Reintentando ${failed.length} fallidos ---`, 'info');
-        const retryFailed = [...failed];
-        failed = [];
+    logEntry(`Iniciando generación: ${state.totalImages} imágenes, concurrencia: ${state.maxConcurrency}`, 'info');
+    updateStats();
 
-        for (const item of retryFailed) {
-            updateProgress(completed, totalImages, `Reintentando: Creative ${item.creative.number} v${item.variant}`);
-            await sleep(2000); // Esperar más antes de reintentar
+    // Lanzar pool
+    await runPool();
 
-            const result = await generateImage(item.creative, item.variant, model, aspect, quality);
-
-            if (result.success) {
-                state.generatedImages.push({
-                    creative: item.creative,
-                    variant: item.variant,
-                    imageData: result.imageData,
-                    mimeType: result.mimeType,
-                    status: 'pending',
-                });
-                logEntry(`✓ Reintento exitoso: Creative ${item.creative.number} v${item.variant}`, 'success');
-                completed++;
-            } else {
-                logEntry(`✗ Reintento fallido: Creative ${item.creative.number} v${item.variant}: ${result.error}`, 'error');
-            }
-            updateProgress(completed, totalImages, '');
-        }
+    // Reintentos
+    if (state.failed.length > 0) {
+        logEntry(`\n--- Reintentando ${state.failed.length} fallidos ---`, 'info');
+        const retryTasks = state.failed.map(f => ({ ...f, retries: f.retries + 1 }));
+        state.failed = [];
+        state.taskQueue = retryTasks;
+        await runPool();
     }
 
     // Finalizar
-    updateProgress(completed, totalImages, `Completado: ${completed}/${totalImages} imágenes`);
-    logEntry(`\n=== Generación finalizada: ${completed}/${totalImages} exitosas ===`, 'info');
+    const successCount = state.generatedImages.length;
+    logEntry(`\n=== Finalizado: ${successCount}/${state.totalImages} exitosas, ${state.failed.length} fallidas ===`, 'info');
+    updateProgress(state.completed, state.totalImages, `Completado: ${successCount}/${state.totalImages}`);
 
     state.isGenerating = false;
-    $btnGenerate.disabled = false;
+    updateGenerateButton();
 
-    // Mostrar galería
     if (state.generatedImages.length > 0) {
         renderGallery();
     }
 }
 
+function runPool() {
+    return new Promise((resolve) => {
+        const checkDone = () => {
+            if (state.taskQueue.length === 0 && state.activeWorkers === 0) {
+                resolve();
+                return;
+            }
+            while (state.activeWorkers < state.maxConcurrency && state.taskQueue.length > 0) {
+                const task = state.taskQueue.shift();
+                state.activeWorkers++;
+                updateStats();
+                runTask(task).then(() => {
+                    state.activeWorkers--;
+                    updateStats();
+                    checkDone();
+                });
+            }
+        };
+        checkDone();
+    });
+}
+
+async function runTask(task) {
+    const { creative, variant, model, aspect, quality, retries } = task;
+    const label = `Creative ${creative.number} v${variant}`;
+
+    updateProgress(state.completed, state.totalImages, `Generando: ${label}...`);
+
+    const result = await generateImage(creative, variant, model, aspect, quality);
+
+    if (result.success) {
+        state.generatedImages.push({
+            creative,
+            variant,
+            imageData: result.imageData,
+            mimeType: result.mimeType,
+            status: 'pending',
+        });
+        state.completed++;
+        logEntry(`✓ ${label} generada`, 'success');
+    } else {
+        logEntry(`✗ ${label}: ${result.error}`, 'error');
+        if (retries < 1) {
+            state.failed.push(task);
+        } else {
+            state.completed++;
+            logEntry(`✗ ${label}: descartada tras ${retries + 1} intentos`, 'error');
+        }
+    }
+    updateProgress(state.completed, state.totalImages, '');
+}
+
+function updateStats() {
+    if ($statCompleted) $statCompleted.textContent = `${state.completed} completadas`;
+    if ($statActive) $statActive.textContent = `${state.activeWorkers} en curso`;
+    if ($statFailed) $statFailed.textContent = `${state.failed.length} fallidas`;
+}
+
+
 async function generateImage(creative, variant, model, aspect, quality) {
     const qualityPrompt = quality === '2k' ? 'Generate this image in high resolution 2K quality. ' : '';
     const aspectPrompt = `The image aspect ratio must be ${aspect}. `;
-
     const fullPrompt = `${qualityPrompt}${aspectPrompt}${creative.prompt}`;
 
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${state.apiKey}`;
 
     const body = {
-        contents: [{
-            parts: [{
-                text: fullPrompt
-            }]
-        }],
-        generationConfig: {
-            responseModalities: ["TEXT", "IMAGE"],
-        }
+        contents: [{ parts: [{ text: fullPrompt }] }],
+        generationConfig: { responseModalities: ["TEXT", "IMAGE"] }
     };
 
     try {
@@ -269,13 +322,11 @@ async function generateImage(creative, variant, model, aspect, quality) {
 
         if (!response.ok) {
             const errData = await response.json().catch(() => ({}));
-            const errMsg = errData?.error?.message || `HTTP ${response.status}`;
-            return { success: false, error: errMsg };
+            return { success: false, error: errData?.error?.message || `HTTP ${response.status}` };
         }
 
         const data = await response.json();
 
-        // Buscar la imagen en la respuesta
         if (data.candidates && data.candidates[0]?.content?.parts) {
             for (const part of data.candidates[0].content.parts) {
                 if (part.inlineData) {
@@ -287,7 +338,6 @@ async function generateImage(creative, variant, model, aspect, quality) {
                 }
             }
         }
-
         return { success: false, error: 'No se encontró imagen en la respuesta' };
     } catch (err) {
         return { success: false, error: err.message };
@@ -309,18 +359,25 @@ function logEntry(text, type = 'info') {
     $batchLog.scrollTop = $batchLog.scrollHeight;
 }
 
-// --- Galería ---
+// --- Galería de Revisión ---
 function renderGallery() {
     $galleryPanel.style.display = 'block';
     $galleryGrid.innerHTML = '';
 
     state.generatedImages.forEach((img, idx) => {
-        const card = document.createElement('div');
-        card.className = `gallery-card ${img.status !== 'pending' ? img.status : ''}`;
-        card.id = `card-${idx}`;
+        const card = createImageCard(img, idx, 'review');
+        $galleryGrid.appendChild(card);
+    });
+}
 
-        const imgSrc = `data:${img.mimeType};base64,${img.imageData}`;
+function createImageCard(img, idx, mode) {
+    const card = document.createElement('div');
+    card.className = `gallery-card ${img.status !== 'pending' ? img.status : ''}`;
+    card.id = mode === 'review' ? `card-${idx}` : `approved-card-${idx}`;
 
+    const imgSrc = `data:${img.mimeType};base64,${img.imageData}`;
+
+    if (mode === 'review') {
         card.innerHTML = `
             <img src="${imgSrc}" alt="Creative ${img.creative.number} v${img.variant}" loading="lazy">
             <div class="gallery-card-info">
@@ -332,14 +389,28 @@ function renderGallery() {
                 <button class="btn-reject ${img.status === 'rejected' ? 'active' : ''}" onclick="rejectImage(${idx})">✗ Descartar</button>
             </div>
         `;
-
-        $galleryGrid.appendChild(card);
-    });
+    } else {
+        card.innerHTML = `
+            <img src="${imgSrc}" alt="Creative ${img.creative.number} v${img.variant}" loading="lazy">
+            <div class="gallery-card-info">
+                <div class="creative-name">Creative ${img.creative.number}: ${img.creative.title}</div>
+                <div class="variant-label">Variante ${img.variant}</div>
+            </div>
+            <div class="gallery-card-actions">
+                <button class="btn-extract" onclick="extractPrompt(${idx})">📋 Extraer Prompt</button>
+                <button class="btn-download-single" onclick="downloadSingle(${idx})">⬇ Descargar</button>
+                <button class="btn-reject-small" onclick="removeApproved(${idx})">✗</button>
+            </div>
+        `;
+    }
+    return card;
 }
 
 function approveImage(idx) {
-    state.generatedImages[idx].status = 'approved';
+    const img = state.generatedImages[idx];
+    img.status = 'approved';
     updateCardStatus(idx);
+    addToApproved(img);
 }
 
 function rejectImage(idx) {
@@ -347,26 +418,123 @@ function rejectImage(idx) {
     updateCardStatus(idx);
 }
 
-function updateCardStatus(idx) {
-    const card = document.getElementById(`card-${idx}`);
-    const img = state.generatedImages[idx];
-    card.className = `gallery-card ${img.status}`;
-
-    const approveBtn = card.querySelector('.btn-approve');
-    const rejectBtn = card.querySelector('.btn-reject');
-    approveBtn.className = `btn-approve ${img.status === 'approved' ? 'active' : ''}`;
-    rejectBtn.className = `btn-reject ${img.status === 'rejected' ? 'active' : ''}`;
+function approveAll() {
+    state.generatedImages.forEach((img, idx) => {
+        if (img.status === 'pending') {
+            img.status = 'approved';
+            updateCardStatus(idx);
+            addToApproved(img);
+        }
+    });
 }
 
-// --- Descargar aprobados ---
-async function downloadApproved() {
-    const approved = state.generatedImages.filter(img => img.status === 'approved');
-    if (approved.length === 0) {
-        alert('No hay imágenes aprobadas para descargar.');
+function updateCardStatus(idx) {
+    const card = document.getElementById(`card-${idx}`);
+    if (!card) return;
+    const img = state.generatedImages[idx];
+    card.className = `gallery-card ${img.status}`;
+    const approveBtn = card.querySelector('.btn-approve');
+    const rejectBtn = card.querySelector('.btn-reject');
+    if (approveBtn) approveBtn.className = `btn-approve ${img.status === 'approved' ? 'active' : ''}`;
+    if (rejectBtn) rejectBtn.className = `btn-reject ${img.status === 'rejected' ? 'active' : ''}`;
+}
+
+// --- Galería de Aprobados ---
+function addToApproved(img) {
+    // Evitar duplicados
+    const exists = state.approvedImages.find(a =>
+        a.creative.number === img.creative.number && a.variant === img.variant && a.imageData === img.imageData
+    );
+    if (exists) return;
+
+    state.approvedImages.push({
+        creative: img.creative,
+        variant: img.variant,
+        imageData: img.imageData,
+        mimeType: img.mimeType,
+    });
+    saveApproved();
+    renderApprovedGallery();
+}
+
+function removeApproved(idx) {
+    state.approvedImages.splice(idx, 1);
+    saveApproved();
+    renderApprovedGallery();
+}
+
+function clearApproved() {
+    if (!confirm('¿Seguro que querés limpiar toda la galería de aprobados?')) return;
+    state.approvedImages = [];
+    saveApproved();
+    renderApprovedGallery();
+}
+
+function saveApproved() {
+    // Guardar en localStorage (ojo: puede haber límite de ~5-10MB)
+    try {
+        localStorage.setItem('approved_images', JSON.stringify(state.approvedImages));
+    } catch (e) {
+        logEntry('⚠ localStorage lleno, no se pueden guardar más aprobados', 'error');
+    }
+    updateApprovedBadge();
+}
+
+function updateApprovedBadge() {
+    if ($approvedCountBadge) {
+        $approvedCountBadge.textContent = state.approvedImages.length;
+    }
+}
+
+function renderApprovedGallery() {
+    if (!$approvedGrid) return;
+    $approvedGrid.innerHTML = '';
+    updateApprovedBadge();
+
+    if (state.approvedImages.length === 0) {
+        $approvedEmpty.style.display = 'block';
         return;
     }
+    $approvedEmpty.style.display = 'none';
 
-    for (const img of approved) {
+    state.approvedImages.forEach((img, idx) => {
+        const card = createImageCard({ ...img, status: 'approved' }, idx, 'approved');
+        $approvedGrid.appendChild(card);
+    });
+}
+
+function extractPrompt(idx) {
+    const img = state.approvedImages[idx];
+    if (!img) return;
+
+    // Cambiar a tab regenerador
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+    document.querySelector('[data-tab="regenerator"]').classList.add('active');
+    document.getElementById('tab-regenerator').classList.add('active');
+
+    // Poner el prompt
+    $regenPrompt.value = img.creative.prompt;
+    updateRegenButton();
+}
+
+function downloadSingle(idx) {
+    const img = state.approvedImages[idx];
+    if (!img) return;
+    const link = document.createElement('a');
+    link.href = `data:${img.mimeType};base64,${img.imageData}`;
+    link.download = `creative-${img.creative.number}-v${img.variant}.png`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+}
+
+async function downloadAllApproved() {
+    if (state.approvedImages.length === 0) {
+        alert('No hay imágenes aprobadas.');
+        return;
+    }
+    for (const img of state.approvedImages) {
         const link = document.createElement('a');
         link.href = `data:${img.mimeType};base64,${img.imageData}`;
         link.download = `creative-${img.creative.number}-v${img.variant}.png`;
@@ -375,6 +543,97 @@ async function downloadApproved() {
         document.body.removeChild(link);
         await sleep(200);
     }
+}
+
+
+// --- Regenerador Individual ---
+async function regenerateSingle() {
+    const prompt = $regenPrompt.value.trim();
+    if (!prompt || !state.apiKey) return;
+
+    $btnRegen.disabled = true;
+    $regenStatus.textContent = 'Generando...';
+    $regenResult.style.display = 'none';
+
+    const model = $regenModel.value;
+    const aspect = $regenAspect.value;
+    const quality = $regenQuality.value;
+
+    const qualityPrompt = quality === '2k' ? 'Generate this image in high resolution 2K quality. ' : '';
+    const aspectPrompt = `The image aspect ratio must be ${aspect}. `;
+    const fullPrompt = `${qualityPrompt}${aspectPrompt}${prompt}`;
+
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${state.apiKey}`;
+
+    const body = {
+        contents: [{ parts: [{ text: fullPrompt }] }],
+        generationConfig: { responseModalities: ["TEXT", "IMAGE"] }
+    };
+
+    try {
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+        });
+
+        if (!response.ok) {
+            const errData = await response.json().catch(() => ({}));
+            $regenStatus.textContent = `Error: ${errData?.error?.message || response.status}`;
+            $btnRegen.disabled = false;
+            return;
+        }
+
+        const data = await response.json();
+        let imageData = null, mimeType = 'image/png';
+
+        if (data.candidates && data.candidates[0]?.content?.parts) {
+            for (const part of data.candidates[0].content.parts) {
+                if (part.inlineData) {
+                    imageData = part.inlineData.data;
+                    mimeType = part.inlineData.mimeType || 'image/png';
+                    break;
+                }
+            }
+        }
+
+        if (imageData) {
+            state.regenResult = { imageData, mimeType, prompt };
+            $regenImage.src = `data:${mimeType};base64,${imageData}`;
+            $regenResult.style.display = 'block';
+            $regenStatus.textContent = '✓ Generada exitosamente';
+        } else {
+            $regenStatus.textContent = 'Error: No se encontró imagen en la respuesta';
+        }
+    } catch (err) {
+        $regenStatus.textContent = `Error: ${err.message}`;
+    }
+
+    $btnRegen.disabled = false;
+    updateRegenButton();
+}
+
+function approveRegenerated() {
+    if (!state.regenResult) return;
+    state.approvedImages.push({
+        creative: { number: 'R', title: 'Regenerada' },
+        variant: state.approvedImages.filter(a => a.creative.number === 'R').length + 1,
+        imageData: state.regenResult.imageData,
+        mimeType: state.regenResult.mimeType,
+    });
+    saveApproved();
+    renderApprovedGallery();
+    $regenStatus.textContent = '✓ Agregada a aprobados';
+}
+
+function downloadRegenerated() {
+    if (!state.regenResult) return;
+    const link = document.createElement('a');
+    link.href = `data:${state.regenResult.mimeType};base64,${state.regenResult.imageData}`;
+    link.download = `regenerada-${Date.now()}.png`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
 }
 
 // --- Reset ---

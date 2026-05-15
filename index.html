@@ -14,77 +14,173 @@
             <p class="subtitle">Genera imágenes en lote con Gemini AI</p>
         </header>
 
-        <!-- Config Panel -->
-        <section class="config-panel">
-            <div class="config-row">
-                <div class="config-item">
-                    <label for="api-key">API Key de Gemini</label>
-                    <div class="api-key-wrapper">
-                        <input type="password" id="api-key" placeholder="Ingresá tu API key...">
-                        <button id="toggle-key" class="btn-icon" title="Mostrar/Ocultar">👁</button>
-                        <button id="save-key" class="btn-small">Guardar</button>
+        <!-- Tabs -->
+        <nav class="tabs">
+            <button class="tab active" data-tab="generator">Generador</button>
+            <button class="tab" data-tab="approved">Aprobados <span id="approved-count-badge">0</span></button>
+            <button class="tab" data-tab="regenerator">Regenerador</button>
+        </nav>
+
+        <!-- TAB: Generator -->
+        <div class="tab-content active" id="tab-generator">
+            <!-- Config Panel -->
+            <section class="config-panel">
+                <div class="config-row">
+                    <div class="config-item" style="flex:2;">
+                        <label for="api-key">API Key de Gemini</label>
+                        <div class="api-key-wrapper">
+                            <input type="password" id="api-key" placeholder="Ingresá tu API key...">
+                            <button id="toggle-key" class="btn-icon" title="Mostrar/Ocultar">👁</button>
+                            <button id="save-key" class="btn-small">Guardar</button>
+                        </div>
+                        <span class="hint" id="key-status">No guardada</span>
                     </div>
-                    <span class="hint" id="key-status">No guardada</span>
                 </div>
-            </div>
-            <div class="config-row">
-                <div class="config-item">
-                    <label for="model-select">Modelo</label>
-                    <select id="model-select">
-                        <option value="gemini-3.1-flash-image-preview">Flash (rápido)</option>
-                        <option value="gemini-3-pro-image-preview">Pro (calidad)</option>
-                    </select>
+                <div class="config-row">
+                    <div class="config-item">
+                        <label for="model-select">Modelo</label>
+                        <select id="model-select">
+                            <option value="gemini-3.1-flash-image-preview">Flash (rápido)</option>
+                            <option value="gemini-3-pro-image-preview">Pro (calidad)</option>
+                        </select>
+                    </div>
+                    <div class="config-item">
+                        <label for="aspect-select">Proporción</label>
+                        <select id="aspect-select">
+                            <option value="1:1">1:1 (Feed)</option>
+                            <option value="4:5">4:5 (Feed vertical)</option>
+                            <option value="9:16">9:16 (Story/Reel)</option>
+                            <option value="16:9">16:9 (Landscape)</option>
+                        </select>
+                    </div>
+                    <div class="config-item">
+                        <label for="quality-select">Calidad</label>
+                        <select id="quality-select">
+                            <option value="1k">1K</option>
+                            <option value="2k">2K</option>
+                        </select>
+                    </div>
+                    <div class="config-item">
+                        <label for="concurrency-select">Concurrencia</label>
+                        <select id="concurrency-select">
+                            <option value="2">2 simultáneos</option>
+                            <option value="3" selected>3 simultáneos</option>
+                            <option value="4">4 simultáneos</option>
+                            <option value="5">5 simultáneos</option>
+                        </select>
+                    </div>
                 </div>
-                <div class="config-item">
-                    <label for="aspect-select">Proporción</label>
-                    <select id="aspect-select">
-                        <option value="1:1">1:1 (Feed)</option>
-                        <option value="4:5">4:5 (Feed vertical)</option>
-                        <option value="9:16">9:16 (Story/Reel)</option>
-                        <option value="16:9">16:9 (Landscape)</option>
-                    </select>
-                </div>
-                <div class="config-item">
-                    <label for="quality-select">Calidad</label>
-                    <select id="quality-select">
-                        <option value="1k">1K</option>
-                        <option value="2k">2K</option>
-                    </select>
-                </div>
-            </div>
-        </section>
+            </section>
 
-        <!-- Input Panel -->
-        <section class="input-panel">
-            <label for="md-input">Pegá tu documento MD con los creativos:</label>
-            <textarea id="md-input" placeholder="## Creative 91: Protocolo vs. Nutricionista&#10;&#10;**Angle:** Comparison...&#10;&#10;### Visual Prompt (for AI image generation)&#10;&#10;**Visual idea:**&#10;..."></textarea>
-            <div class="input-actions">
-                <span class="creative-count" id="creative-count">0 creativos detectados</span>
-                <button id="btn-generate" class="btn-primary" disabled>Generar Creativos</button>
-            </div>
-        </section>
-
-        <!-- Progress Panel -->
-        <section class="progress-panel" id="progress-panel" style="display:none;">
-            <h2>Progreso de Generación</h2>
-            <div class="progress-bar-container">
-                <div class="progress-bar" id="progress-bar"></div>
-            </div>
-            <p class="progress-text" id="progress-text">Iniciando...</p>
-            <div class="batch-log" id="batch-log"></div>
-        </section>
-
-        <!-- Gallery Panel -->
-        <section class="gallery-panel" id="gallery-panel" style="display:none;">
-            <div class="gallery-header">
-                <h2>Revisión de Creativos</h2>
-                <div class="gallery-actions">
-                    <button id="btn-download-approved" class="btn-secondary">Descargar Aprobados</button>
-                    <button id="btn-new-batch" class="btn-secondary">Nuevo Lote</button>
+            <!-- Input Panel -->
+            <section class="input-panel">
+                <label for="md-input">Pegá tu documento MD con los creativos:</label>
+                <textarea id="md-input" placeholder="## Creative 91: Protocolo vs. Nutricionista&#10;&#10;**Angle:** Comparison...&#10;&#10;### Visual Prompt (for AI image generation)&#10;&#10;**Visual idea:**&#10;..."></textarea>
+                <div class="input-actions">
+                    <span class="creative-count" id="creative-count">0 creativos detectados</span>
+                    <button id="btn-generate" class="btn-primary" disabled>Generar Creativos</button>
                 </div>
-            </div>
-            <div class="gallery-grid" id="gallery-grid"></div>
-        </section>
+            </section>
+
+            <!-- Progress Panel -->
+            <section class="progress-panel" id="progress-panel" style="display:none;">
+                <h2>Progreso de Generación</h2>
+                <div class="progress-stats">
+                    <span class="stat" id="stat-completed">0 completadas</span>
+                    <span class="stat" id="stat-active">0 en curso</span>
+                    <span class="stat stat-error" id="stat-failed">0 fallidas</span>
+                </div>
+                <div class="progress-bar-container">
+                    <div class="progress-bar" id="progress-bar"></div>
+                </div>
+                <p class="progress-text" id="progress-text">Iniciando...</p>
+                <div class="batch-log" id="batch-log"></div>
+            </section>
+
+            <!-- Gallery Panel -->
+            <section class="gallery-panel" id="gallery-panel" style="display:none;">
+                <div class="gallery-header">
+                    <h2>Revisión de Creativos</h2>
+                    <div class="gallery-actions">
+                        <button id="btn-approve-all" class="btn-secondary">Aprobar Todo</button>
+                        <button id="btn-new-batch" class="btn-secondary">Nuevo Lote</button>
+                    </div>
+                </div>
+                <div class="gallery-grid" id="gallery-grid"></div>
+            </section>
+        </div>
+
+        <!-- TAB: Approved -->
+        <div class="tab-content" id="tab-approved">
+            <section class="approved-panel">
+                <div class="gallery-header">
+                    <h2>Imágenes Aprobadas</h2>
+                    <div class="gallery-actions">
+                        <button id="btn-download-all" class="btn-primary">Descargar Todas</button>
+                        <button id="btn-clear-approved" class="btn-secondary">Limpiar Galería</button>
+                    </div>
+                </div>
+                <div class="approved-empty" id="approved-empty">
+                    <p>No hay imágenes aprobadas todavía.</p>
+                    <p class="hint">Generá creativos y aproblás las que te gusten.</p>
+                </div>
+                <div class="gallery-grid" id="approved-grid"></div>
+            </section>
+        </div>
+
+        <!-- TAB: Regenerator -->
+        <div class="tab-content" id="tab-regenerator">
+            <section class="regenerator-panel">
+                <h2>Regenerador Individual</h2>
+                <p class="hint" style="margin-bottom:16px;">Editá el prompt y regenerá una sola imagen con ajustes sutiles.</p>
+
+                <div class="config-row" style="margin-bottom:16px;">
+                    <div class="config-item">
+                        <label for="regen-model">Modelo</label>
+                        <select id="regen-model">
+                            <option value="gemini-3.1-flash-image-preview">Flash (rápido)</option>
+                            <option value="gemini-3-pro-image-preview">Pro (calidad)</option>
+                        </select>
+                    </div>
+                    <div class="config-item">
+                        <label for="regen-aspect">Proporción</label>
+                        <select id="regen-aspect">
+                            <option value="1:1">1:1 (Feed)</option>
+                            <option value="4:5">4:5 (Feed vertical)</option>
+                            <option value="9:16">9:16 (Story/Reel)</option>
+                            <option value="16:9">16:9 (Landscape)</option>
+                        </select>
+                    </div>
+                    <div class="config-item">
+                        <label for="regen-quality">Calidad</label>
+                        <select id="regen-quality">
+                            <option value="1k">1K</option>
+                            <option value="2k">2K</option>
+                        </select>
+                    </div>
+                </div>
+
+                <label for="regen-prompt">Prompt:</label>
+                <textarea id="regen-prompt" placeholder="El prompt aparecerá acá cuando uses 'Extraer Prompt' en una imagen aprobada..."></textarea>
+
+                <div class="regen-actions">
+                    <button id="btn-regen" class="btn-primary" disabled>Generar 1 Imagen</button>
+                    <span class="regen-status" id="regen-status"></span>
+                </div>
+
+                <div class="regen-result" id="regen-result" style="display:none;">
+                    <h3>Resultado</h3>
+                    <div class="regen-image-wrapper">
+                        <img id="regen-image" src="" alt="Regenerada">
+                    </div>
+                    <div class="regen-result-actions">
+                        <button id="btn-regen-approve" class="btn-approve">Aprobar</button>
+                        <button id="btn-regen-download" class="btn-secondary">Descargar</button>
+                        <button id="btn-regen-again" class="btn-secondary">Regenerar de nuevo</button>
+                    </div>
+                </div>
+            </section>
+        </div>
     </div>
 
     <script src="app.js"></script>
