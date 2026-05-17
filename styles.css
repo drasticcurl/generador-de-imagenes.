@@ -645,3 +645,88 @@ select {
 ::-webkit-scrollbar-track { background: #1a1a1a; }
 ::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: #444; }
+
+/* Cloudinary Config */
+.cloudinary-config {
+    margin-top: 16px;
+    padding-top: 16px;
+    border-top: 1px solid #2a2a2a;
+}
+
+.config-item-btn {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 6px;
+}
+
+.btn-cloudinary {
+    background: linear-gradient(135deg, #3448c5, #6c5ce7);
+    border: none;
+    border-radius: 10px;
+    color: #fff;
+    padding: 10px 20px;
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.btn-cloudinary:hover:not(:disabled) {
+    background: linear-gradient(135deg, #2a3cb0, #5b4bd5);
+    transform: translateY(-1px);
+}
+
+.btn-cloudinary:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+/* Upload Overlay */
+.upload-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0,0,0,0.8);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+}
+
+.upload-modal {
+    background: #1a1a1a;
+    border: 1px solid #3448c5;
+    border-radius: 16px;
+    padding: 30px;
+    width: 90%;
+    max-width: 550px;
+}
+
+.upload-modal h2 {
+    font-size: 1.2rem;
+    margin-bottom: 16px;
+    color: #6c5ce7;
+}
+
+.upload-results {
+    max-height: 200px;
+    overflow-y: auto;
+    font-size: 0.8rem;
+    font-family: monospace;
+    color: #666;
+    padding: 10px;
+    background: #0f0f0f;
+    border-radius: 8px;
+    margin-top: 12px;
+}
+
+.upload-results a {
+    text-decoration: none;
+}
+
+.upload-results a:hover {
+    text-decoration: underline;
+}

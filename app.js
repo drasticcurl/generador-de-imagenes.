@@ -5,10 +5,13 @@
 // --- Estado global ---
 const state = {
     apiKey: '',
+    cloudinaryCloudName: '',
+    cloudinaryUploadPreset: '',
     creatives: [],
     generatedImages: [],
     approvedImages: JSON.parse(localStorage.getItem('approved_images') || '[]'),
     isGenerating: false,
+    isUploading: false,
     // Concurrency pool
     activeWorkers: 0,
     maxConcurrency: 3,
@@ -30,7 +33,9 @@ let $apiKey, $toggleKey, $saveKey, $keyStatus, $modelSelect, $aspectSelect,
     $btnDownloadAll, $btnClearApproved, $approvedCountBadge,
     $regenPrompt, $regenModel, $regenAspect, $regenQuality, $btnRegen,
     $regenStatus, $regenResult, $regenImage, $btnRegenApprove, $btnRegenDownload,
-    $btnRegenAgain, $statCompleted, $statActive, $statFailed;
+    $btnRegenAgain, $statCompleted, $statActive, $statFailed,
+    $cloudinaryCloudName, $cloudinaryUploadPreset, $saveCloudinary, $cloudinaryStatus,
+    $btnUploadCloudinary, $uploadOverlay, $uploadProgressBar, $uploadProgressText, $uploadResults;
 
 function cacheDom() {
     $apiKey = document.getElementById('api-key');
@@ -72,12 +77,22 @@ function cacheDom() {
     $statCompleted = document.getElementById('stat-completed');
     $statActive = document.getElementById('stat-active');
     $statFailed = document.getElementById('stat-failed');
+    $cloudinaryCloudName = document.getElementById('cloudinary-cloud-name');
+    $cloudinaryUploadPreset = document.getElementById('cloudinary-upload-preset');
+    $saveCloudinary = document.getElementById('save-cloudinary');
+    $cloudinaryStatus = document.getElementById('cloudinary-status');
+    $btnUploadCloudinary = document.getElementById('btn-upload-cloudinary');
+    $uploadOverlay = document.getElementById('upload-overlay');
+    $uploadProgressBar = document.getElementById('upload-progress-bar');
+    $uploadProgressText = document.getElementById('upload-progress-text');
+    $uploadResults = document.getElementById('upload-results');
 }
 
 // --- Init ---
 function init() {
     cacheDom();
     loadApiKey();
+    loadCloudinaryConfig();
     setupEventListeners();
     setupTabs();
     renderApprovedGallery();
@@ -91,6 +106,21 @@ function loadApiKey() {
         $keyStatus.textContent = '✓ Guardada';
         $keyStatus.classList.add('saved');
         updateGenerateButton();
+    }
+}
+
+function loadCloudinaryConfig() {
+    const cloudName = localStorage.getItem('cloudinary_cloud_name');
+    const uploadPreset = localStorage.getItem('cloudinary_upload_preset');
+    if (cloudName && uploadPreset) {
+        state.cloudinaryCloudName = cloudName;
+        state.cloudinaryUploadPreset = uploadPreset;
+        if ($cloudinaryCloudName) $cloudinaryCloudName.value = cloudName;
+        if ($cloudinaryUploadPreset) $cloudinaryUploadPreset.value = uploadPreset;
+        if ($cloudinaryStatus) {
+            $cloudinaryStatus.textContent = '✓ Configurado';
+            $cloudinaryStatus.classList.add('saved');
+        }
     }
 }
 
@@ -141,6 +171,25 @@ function setupEventListeners() {
     $btnRegenApprove.addEventListener('click', approveRegenerated);
     $btnRegenDownload.addEventListener('click', downloadRegenerated);
     $btnRegenAgain.addEventListener('click', regenerateSingle);
+
+    // Cloudinary
+    $saveCloudinary.addEventListener('click', () => {
+        const cloudName = $cloudinaryCloudName.value.trim();
+        const uploadPreset = $cloudinaryUploadPreset.value.trim();
+        if (cloudName && uploadPreset) {
+            localStorage.setItem('cloudinary_cloud_name', cloudName);
+            localStorage.setItem('cloudinary_upload_preset', uploadPreset);
+            state.cloudinaryCloudName = cloudName;
+            state.cloudinaryUploadPreset = uploadPreset;
+            $cloudinaryStatus.textContent = '✓ Configurado';
+            $cloudinaryStatus.classList.add('saved');
+        } else {
+            $cloudinaryStatus.textContent = 'Completá ambos campos';
+            $cloudinaryStatus.classList.remove('saved');
+        }
+    });
+
+    $btnUploadCloudinary.addEventListener('click', uploadToCloudinary);
 }
 
 // --- Parser ---
@@ -669,6 +718,97 @@ function resetForNewBatch() {
 // --- Utils ---
 function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+// --- Cloudinary Upload ---
+async function uploadToCloudinary() {
+    if (state.isUploading) return;
+
+    if (!state.cloudinaryCloudName || !state.cloudinaryUploadPreset) {
+        alert('Configurá tu Cloud Name y Upload Preset de Cloudinary primero (en la pestaña Generador).');
+        return;
+    }
+
+    if (state.approvedImages.length === 0) {
+        alert('No hay imágenes aprobadas para subir.');
+        return;
+    }
+
+    state.isUploading = true;
+    $btnUploadCloudinary.disabled = true;
+    $uploadOverlay.style.display = 'flex';
+    $uploadResults.innerHTML = '';
+
+    const total = state.approvedImages.length;
+    let completed = 0;
+    let successCount = 0;
+
+    for (const img of state.approvedImages) {
+        updateUploadProgress(completed, total, `Subiendo: Creative ${img.creative.number} v${img.variant}...`);
+
+        const result = await uploadSingleImage(img);
+
+        if (result.success) {
+            successCount++;
+            addUploadResult(`✓ Creative ${img.creative.number} v${img.variant}`, 'success', result.url);
+        } else {
+            addUploadResult(`✗ Creative ${img.creative.number} v${img.variant}: ${result.error}`, 'error');
+        }
+
+        completed++;
+        updateUploadProgress(completed, total, '');
+        await sleep(300);
+    }
+
+    updateUploadProgress(total, total, `Completado: ${successCount}/${total} subidas exitosas`);
+
+    state.isUploading = false;
+    $btnUploadCloudinary.disabled = false;
+}
+
+async function uploadSingleImage(img) {
+    const url = `https://api.cloudinary.com/v1_1/${state.cloudinaryCloudName}/image/upload`;
+
+    const formData = new FormData();
+    formData.append('file', `data:${img.mimeType};base64,${img.imageData}`);
+    formData.append('upload_preset', state.cloudinaryUploadPreset);
+    formData.append('folder', 'generador-creativos');
+    formData.append('public_id', `creative-${img.creative.number}-v${img.variant}-${Date.now()}`);
+
+    try {
+        const response = await fetch(url, {
+            method: 'POST',
+            body: formData,
+        });
+
+        if (!response.ok) {
+            const errData = await response.json().catch(() => ({}));
+            return { success: false, error: errData?.error?.message || `HTTP ${response.status}` };
+        }
+
+        const data = await response.json();
+        return { success: true, url: data.secure_url };
+    } catch (err) {
+        return { success: false, error: err.message };
+    }
+}
+
+function updateUploadProgress(completed, total, message) {
+    const pct = total > 0 ? Math.round((completed / total) * 100) : 0;
+    $uploadProgressBar.style.width = `${pct}%`;
+    $uploadProgressText.textContent = message || `${completed}/${total} imágenes (${pct}%)`;
+}
+
+function addUploadResult(text, type, url) {
+    const entry = document.createElement('div');
+    entry.className = `log-entry ${type}`;
+    if (url) {
+        entry.innerHTML = `${text} → <a href="${url}" target="_blank" style="color:#7a9b7e;">ver imagen</a>`;
+    } else {
+        entry.textContent = text;
+    }
+    $uploadResults.appendChild(entry);
+    $uploadResults.scrollTop = $uploadResults.scrollHeight;
 }
 
 // --- Start ---

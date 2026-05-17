@@ -70,6 +70,21 @@
                         </select>
                     </div>
                 </div>
+                <!-- Cloudinary Config -->
+                <div class="config-row cloudinary-config">
+                    <div class="config-item">
+                        <label for="cloudinary-cloud-name">Cloudinary Cloud Name</label>
+                        <input type="text" id="cloudinary-cloud-name" placeholder="tu-cloud-name">
+                    </div>
+                    <div class="config-item">
+                        <label for="cloudinary-upload-preset">Upload Preset (unsigned)</label>
+                        <input type="text" id="cloudinary-upload-preset" placeholder="tu-upload-preset">
+                    </div>
+                    <div class="config-item config-item-btn">
+                        <button id="save-cloudinary" class="btn-small">Guardar Cloudinary</button>
+                        <span class="hint" id="cloudinary-status">No configurado</span>
+                    </div>
+                </div>
             </section>
 
             <!-- Input Panel -->
@@ -119,6 +134,7 @@
                 <div class="gallery-header">
                     <h2>Imágenes Aprobadas</h2>
                     <div class="gallery-actions">
+                        <button id="btn-upload-cloudinary" class="btn-cloudinary">Subir a Cloudinary</button>
                         <button id="btn-download-all" class="btn-primary">Descargar Todas</button>
                         <button id="btn-clear-approved" class="btn-secondary">Limpiar Galería</button>
                     </div>
@@ -187,5 +203,18 @@
     </div>
 
     <script src="app.js"></script>
+
+    <!-- Upload Progress Modal -->
+    <div class="upload-overlay" id="upload-overlay" style="display:none;">
+        <div class="upload-modal">
+            <h2>Subida a Cloudinary</h2>
+            <div class="progress-bar-container">
+                <div class="progress-bar" id="upload-progress-bar"></div>
+            </div>
+            <p class="progress-text" id="upload-progress-text">Subiendo...</p>
+            <div class="upload-results" id="upload-results"></div>
+            <button id="btn-close-upload" class="btn-secondary" style="margin-top:12px;" onclick="document.getElementById('upload-overlay').style.display='none'">Cerrar</button>
+        </div>
+    </div>
 </body>
 </html>
